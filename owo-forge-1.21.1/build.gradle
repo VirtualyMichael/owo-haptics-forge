@@ -9,7 +9,7 @@ plugins {
     id 'net.minecraftforge.gradle' version '[7.0.3,8)'
 }
 
-version = '1.0.0'
+version = '1.1.0'
 group = 'com.owohaptics'
 
 // Mojang ships Java 21 to end users in 1.20.5+, so your mod should target Java 21.

@@ -43,7 +43,7 @@ public final class HapticsManager {
     private static void playRaw(Sensation s, boolean force) {
         OwoClient c = owo();
         if (c == null || s == null || !HapticsConfig.ENABLED.get()) return;
-        int pct = HapticsConfig.MASTER_INTENSITY.get();
+        int pct = OwoHaptics.effects.settings.masterIntensity;
         c.play(pct == 100 ? s : s.scaled(pct), force);
     }
 
@@ -90,12 +90,12 @@ public final class HapticsManager {
             return;
         }
 
-        if (HapticsConfig.DAMAGE.get()) handleDamage(p);
+        if (OwoHaptics.effects.settings.damage) handleDamage(p);
         else lastHealth = p.getHealth() + p.getAbsorptionAmount();
-        if (HapticsConfig.ENVIRONMENT.get()) handleEnvironment(p);
-        if (HapticsConfig.HEARTBEAT.get()) handleHeartbeat(p);
-        if (HapticsConfig.ARMS.get()) handleArms(mc, p);
-        if (HapticsConfig.EATING.get()) handleEating(p);
+        if (OwoHaptics.effects.settings.environment) handleEnvironment(p);
+        if (OwoHaptics.effects.settings.heartbeat) handleHeartbeat(p);
+        if (OwoHaptics.effects.settings.arms) handleArms(mc, p);
+        if (OwoHaptics.effects.settings.eating) handleEating(p);
     }
 
     // ------------------------------------------------------------------ damage
@@ -230,6 +230,11 @@ public final class HapticsManager {
                     boolean ok = owo() != null && owo().isConnected();
                     c.getSource().sendSuccess(() -> Component.literal(
                             ok ? "OWO app connected." : "OWO app NOT connected (open the OWO app / visualizer)."), false);
+                    return 1;
+                }))
+                .then(Commands.literal("ui").executes(c -> {
+                    String u = OwoHaptics.webUrl();
+                    c.getSource().sendSuccess(() -> Component.literal(u == null ? "Settings page is disabled or could not start." : "Settings page: " + u), false);
                     return 1;
                 }))
                 .then(Commands.literal("reload").executes(c -> {

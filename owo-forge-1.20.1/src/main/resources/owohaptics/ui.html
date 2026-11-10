@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OWO Haptics Settings</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1d2127; --panel2: #252a32; --text: #e8eaed; --muted: #9aa3ad;
+    --accent: #5aa9ff; --good: #3ecf8e; --bad: #ff6b6b; --border: #333a44;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg: #f4f6f8; --panel: #fff; --panel2: #eef1f4; --text: #1b1f23; --muted: #5d6670;
+            --accent: #1769d1; --good: #178a5a; --bad: #c93636; --border: #d5dae0; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, sans-serif; }
+  header { position: sticky; top: 0; z-index: 5; background: var(--panel); border-bottom: 1px solid var(--border);
+           padding: 12px 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; flex: 1 1 auto; }
+  .badge { padding: 4px 10px; border-radius: 99px; font-size: 13px; font-weight: 600; }
+  .badge.on { background: color-mix(in srgb, var(--good) 22%, transparent); color: var(--good); }
+  .badge.off { background: color-mix(in srgb, var(--bad) 22%, transparent); color: var(--bad); }
+  main { max-width: 900px; margin: 0 auto; padding: 16px; }
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 26px 0 10px; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 12px; }
+  .card.disabled { opacity: .55; }
+  .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .row + .row { margin-top: 10px; }
+  .title { font-weight: 600; flex: 1 1 auto; }
+  .sub { color: var(--muted); font-size: 12px; font-weight: 400; }
+  label.s { display: grid; grid-template-columns: 96px 1fr 52px; gap: 8px; align-items: center; width: 100%; font-size: 13px; color: var(--muted); }
+  label.s output { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
+  input[type=range] { width: 100%; accent-color: var(--accent); }
+  button { background: var(--panel2); color: var(--text); border: 1px solid var(--border); border-radius: 8px;
+           padding: 7px 14px; font: inherit; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.danger:hover { border-color: var(--bad); color: var(--bad); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { padding: 3px 10px; border-radius: 99px; border: 1px solid var(--border); background: var(--panel2);
+          font-size: 12px; cursor: pointer; user-select: none; }
+  .chip.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .chip.dyn { border-style: dashed; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  .toggles { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+  .toggles label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+  #toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--panel2);
+           border: 1px solid var(--border); padding: 8px 16px; border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+  p.note { color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>OWO Haptics</h1>
+  <span id="conn" class="badge off">checking…</span>
+  <button id="stop">Stop</button>
+  <button id="reset" class="danger">Reset all</button>
+</header>
+<main>
+  <h2>Global</h2>
+  <div class="card">
+    <label class="s"><span>Master strength</span><input id="master" type="range" min="0" max="150"><output id="masterOut"></output></label>
+    <div class="row toggles" id="toggles"></div>
+  </div>
+  <div id="groups"></div>
+  <p class="note">Changes apply instantly and are saved to <code>config/owohaptics/effects.json</code>.
+    <b>Test</b> plays the values currently on screen using the connection of the running game.
+    Dashed zones follow the game: <i>source</i> = side the hit came from, <i>hand</i> = the arm used, <i>main/off arm</i> = by your main-hand setting.</p>
+</main>
+<div id="toast"></div>
+<script>
+const H = {'X-OWO': '1', 'Content-Type': 'application/json'};
+const MUSCLES = ['PECTORAL_R','PECTORAL_L','ABDOMINAL_R','ABDOMINAL_L','ARM_R','ARM_L','DORSAL_R','DORSAL_L','LUMBAR_R','LUMBAR_L'];
+const GROUPS = ['front','back','left','right','all','torso','arms','heart'];
+const DYN = ['source','hand','other_hand','main_arm','off_arm'];
+const TITLES = {damage:'Damage', env:'Environment', heartbeat:'Heartbeat', arm:'Arms and VR', eat:'Eating', other:'Custom'};
+const TOGGLES = [['damage','Damage'],['environment','Environment'],['heartbeat','Low-health heartbeat'],['arms','Arm haptics'],['eating','Eating']];
+let state = null;
+const timers = {};
+const $ = (s, el=document) => el.querySelector(s);
+
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 1600); }
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : {method: 'POST', headers: H, body: JSON.stringify(body)});
+  return r.json();
+}
+function debounced(key, fn) { clearTimeout(timers[key]); timers[key] = setTimeout(fn, 250); }
+
+function slider(label, min, max, step, value, unit, onInput) {
+  const l = document.createElement('label'); l.className = 's';
+  const out = document.createElement('output');
+  const inp = document.createElement('input'); inp.type = 'range'; inp.min = min; inp.max = max; inp.step = step; inp.value = value;
+  const show = v => out.textContent = (+v).toFixed(step < 1 ? 1 : 0) + unit;
+  show(value);
+  inp.oninput = () => { show(inp.value); onInput(+inp.value); };
+  const sp = document.createElement('span'); sp.textContent = label;
+  l.append(sp, inp, out); return l;
+}
+
+function render() {
+  const m = $('#master'); m.value = state.settings.masterIntensity; $('#masterOut').textContent = m.value + '%';
+  const tg = $('#toggles'); tg.innerHTML = '';
+  for (const [k, name] of TOGGLES) {
+    const l = document.createElement('label'); const c = document.createElement('input'); c.type = 'checkbox'; c.checked = state.settings[k];
+    c.onchange = () => { state.settings[k] = c.checked; api('/api/settings', {[k]: c.checked}); };
+    l.append(c, name); tg.append(l);
+  }
+  const groups = {};
+  for (const id of Object.keys(state.effects)) {
+    const g = ['damage','env','heartbeat','arm','eat'].includes(id.split('.')[0]) ? id.split('.')[0] : 'other';
+    (groups[g] = groups[g] || []).push(id);
+  }
+  const root = $('#groups'); root.innerHTML = '';
+  for (const g of Object.keys(TITLES)) {
+    if (!groups[g]) continue;
+    const h = document.createElement('h2'); h.textContent = TITLES[g]; root.append(h);
+    groups[g].forEach(id => root.append(card(id)));
+  }
+}
+
+function card(id) {
+  const d = state.effects[id];
+  const c = document.createElement('div'); c.className = 'card' + (d.enabled ? '' : ' disabled');
+  const save = () => debounced(id, () => api('/api/effect/' + encodeURIComponent(id), d));
+  const top = document.createElement('div'); top.className = 'row';
+  const en = document.createElement('input'); en.type = 'checkbox'; en.checked = d.enabled;
+  en.onchange = () => { d.enabled = en.checked; c.classList.toggle('disabled', !d.enabled); save(); };
+  const t = document.createElement('div'); t.className = 'title'; t.innerHTML = '<span></span> <span class="sub"></span>';
+  t.firstChild.textContent = id; t.lastChild.textContent = zoneSummary(d);
+  const test = document.createElement('button'); test.className = 'primary'; test.textContent = 'Test';
+  test.onclick = async () => {
+    const r = await api('/api/preview', Object.assign({}, d, {amount: 5}));
+    toast(!r.connected ? 'OWO app not connected' : r.played ? 'Sent' : 'No valid zone selected');
+  };
+  top.append(en, t, test); c.append(top);
+  const upd = () => { t.lastChild.textContent = zoneSummary(d); save(); };
+  c.append(slider('Strength', 0, 100, 1, d.intensity, '%', v => { d.intensity = v; upd(); }));
+  c.append(slider('Per damage', 0, 20, 0.5, d.perDamage, '%', v => { d.perDamage = v; upd(); }));
+  const det = document.createElement('details'); det.innerHTML = '<summary>Timing and zones</summary>';
+  det.append(slider('Duration', 0.1, 5, 0.1, d.duration, 's', v => { d.duration = v; upd(); }));
+  det.append(slider('Frequency', 1, 100, 1, d.frequency, ' Hz', v => { d.frequency = v; upd(); }));
+  det.append(slider('Fade in', 0, 2, 0.1, d.rampUp, 's', v => { d.rampUp = v; upd(); }));
+  det.append(slider('Fade out', 0, 2, 0.1, d.rampDown, 's', v => { d.rampDown = v; upd(); }));
+  const chips = document.createElement('div'); chips.className = 'chips'; chips.style.marginTop = '10px';
+  const has = z => d.zones.some(x => x.toLowerCase() === z.toLowerCase());
+  for (const z of [...GROUPS, ...DYN, ...MUSCLES]) {
+    const b = document.createElement('span');
+    b.className = 'chip' + (has(z) ? ' on' : '') + (DYN.includes(z) ? ' dyn' : '');
+    b.textContent = z.toLowerCase();
+    b.onclick = () => {
+      d.zones = has(z) ? d.zones.filter(x => x.toLowerCase() !== z.toLowerCase()) : [...d.zones, z];
+      b.classList.toggle('on', has(z)); upd();
+    };
+    chips.append(b);
+  }
+  det.append(chips); c.append(det);
+  return c;
+}
+function zoneSummary(d) { return d.zones.join(', ').toLowerCase(); }
+
+$('#master').oninput = e => {
+  const v = +e.target.value; $('#masterOut').textContent = v + '%'; state.settings.masterIntensity = v;
+  debounced('master', () => api('/api/settings', {masterIntensity: v}));
+};
+$('#stop').onclick = () => api('/api/stop', {});
+$('#reset').onclick = async () => {
+  if (!confirm('Reset every effect and setting to the defaults?')) return;
+  await api('/api/reset', {}); await load(); toast('Reset to defaults');
+};
+function showConn(on) { const b = $('#conn'); b.className = 'badge ' + (on ? 'on' : 'off'); b.textContent = on ? 'OWO app connected' : 'OWO app not connected'; }
+async function load() { state = await api('/api/state'); showConn(state.connected); render(); }
+async function poll() { try { showConn((await api('/api/state')).connected); } catch (e) { $('#conn').className = 'badge off'; $('#conn').textContent = 'Game not running'; } }
+load().catch(() => toast('Could not reach the mod'));
+setInterval(poll, 3000);
+</script>
+</body>
+</html>

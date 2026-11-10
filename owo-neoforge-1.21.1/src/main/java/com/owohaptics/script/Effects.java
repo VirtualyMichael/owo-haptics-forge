@@ -14,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -54,6 +55,18 @@ public final class Effects {
 
     private final Map<String, Def> defs = new LinkedHashMap<String, Def>();
     private final Map<String, String> damageTypes = new LinkedHashMap<String, String>();
+    public final Settings settings = new Settings();
+    private Path file;
+
+    /** Dynamic zone tokens used when an effect is previewed/tested outside of gameplay. */
+    private static final Map<String, Muscle[]> PREVIEW_DYNAMIC = new HashMap<String, Muscle[]>();
+    static {
+        PREVIEW_DYNAMIC.put("source", Muscle.TORSO_FRONT);
+        PREVIEW_DYNAMIC.put("hand", new Muscle[]{Muscle.ARM_R});
+        PREVIEW_DYNAMIC.put("other_hand", new Muscle[]{Muscle.ARM_L});
+        PREVIEW_DYNAMIC.put("main_arm", new Muscle[]{Muscle.ARM_R});
+        PREVIEW_DYNAMIC.put("off_arm", new Muscle[]{Muscle.ARM_L});
+    }
 
     public Effects() {
         loadDefaults();
@@ -105,17 +118,17 @@ public final class Effects {
     }
 
     /** Effect id for a vanilla/modded damage message id; falls back to damage.generic. */
-    public String effectForDamage(String msgId) {
+    public synchronized String effectForDamage(String msgId) {
         String id = damageTypes.get(msgId);
         return id != null ? id : "damage.generic";
     }
 
-    public Def get(String id) {
+    public synchronized Def get(String id) {
         return defs.get(id);
     }
 
-    public Iterable<String> ids() {
-        return defs.keySet();
+    public synchronized List<String> ids() {
+        return new ArrayList<String>(defs.keySet());
     }
 
     /**
@@ -124,7 +137,7 @@ public final class Effects {
      * @param amount  effect-specific magnitude (damage points, ticks, ...), multiplied by perDamage
      * @param dynamic muscles for dynamic zone tokens (source, hand, ...); may be empty
      */
-    public Sensation build(String id, double amount, Map<String, Muscle[]> dynamic) {
+    public synchronized Sensation build(String id, double amount, Map<String, Muscle[]> dynamic) {
         Def d = defs.get(id);
         if (d == null || !d.enabled) return null;
         List<Muscle> zones = resolve(d.zones, dynamic);
@@ -168,8 +181,10 @@ public final class Effects {
     // ------------------------------------------------------------------ file handling
 
     /** Loads (and, if missing, writes out) the user file. Bad files are reported and defaults are kept. */
-    public void load(Path file, Consumer<String> log) {
+    public synchronized void load(Path file, Consumer<String> log) {
+        this.file = file;
         loadDefaults();
+        settings.reset();
         try {
             if (!Files.exists(file)) {
                 if (file.getParent() != null) Files.createDirectories(file.getParent());
@@ -189,6 +204,7 @@ public final class Effects {
                     merge(d, e.getValue().getAsJsonObject());
                 }
             }
+            if (root.has("settings")) mergeSettings(root.getAsJsonObject("settings"));
             if (root.has("damageTypes")) {
                 for (Map.Entry<String, JsonElement> e : root.getAsJsonObject("damageTypes").entrySet()) {
                     damageTypes.put(e.getKey(), e.getValue().getAsString());
@@ -197,6 +213,7 @@ public final class Effects {
             log.accept("Loaded effects from " + file);
         } catch (IOException | RuntimeException ex) {
             loadDefaults();
+            settings.reset();
             log.accept("Could not read " + file + " (" + ex + "); using built-in defaults");
         }
     }
@@ -227,8 +244,74 @@ public final class Effects {
                 + "a muscle name like ARM_R, or source/hand/other_hand/main_arm/off_arm. "
                 + "Final intensity = intensity + perDamage * amount. Add your own effect ids, and map "
                 + "modded damage types under damageTypes (type message id -> effect id).");
+        root.add("settings", GSON.toJsonTree(settings));
         root.add("effects", GSON.toJsonTree(defs));
         root.add("damageTypes", GSON.toJsonTree(damageTypes));
         return GSON.toJson(root);
+    }
+
+    // ------------------------------------------------------------------ live editing (web UI)
+
+    private void mergeSettings(JsonObject o) {
+        if (o.has("masterIntensity")) settings.masterIntensity = Math.max(0, Math.min(150, o.get("masterIntensity").getAsInt()));
+        if (o.has("damage")) settings.damage = o.get("damage").getAsBoolean();
+        if (o.has("environment")) settings.environment = o.get("environment").getAsBoolean();
+        if (o.has("heartbeat")) settings.heartbeat = o.get("heartbeat").getAsBoolean();
+        if (o.has("arms")) settings.arms = o.get("arms").getAsBoolean();
+        if (o.has("eating")) settings.eating = o.get("eating").getAsBoolean();
+    }
+
+    /** Settings, effects and damage-type map as JSON for the UI. */
+    public synchronized JsonObject snapshot() {
+        JsonObject root = new JsonObject();
+        root.add("settings", GSON.toJsonTree(settings));
+        root.add("effects", GSON.toJsonTree(defs));
+        root.add("damageTypes", GSON.toJsonTree(damageTypes));
+        return root;
+    }
+
+    public synchronized void updateSettings(JsonObject o) {
+        mergeSettings(o);
+        save();
+    }
+
+    /** Merges the given fields into an effect (creating it if new) and saves. */
+    public synchronized boolean updateEffect(String id, JsonObject o) {
+        if (!id.matches("[A-Za-z0-9._-]{1,48}")) return false;
+        Def d = defs.get(id);
+        if (d == null) {
+            d = new Def();
+            defs.put(id, d);
+        }
+        merge(d, o);
+        save();
+        return true;
+    }
+
+    public synchronized void resetToDefaults() {
+        loadDefaults();
+        settings.reset();
+        save();
+    }
+
+    /** Builds a sensation from unsaved UI values for the Test button. Null if no valid zone. */
+    public synchronized Sensation buildPreview(JsonObject def, double amount) {
+        Def d = new Def();
+        merge(d, def);
+        List<Muscle> zones = resolve(d.zones, PREVIEW_DYNAMIC);
+        if (zones.isEmpty()) return null;
+        int intensity = (int) Math.round(d.intensity + d.perDamage * amount);
+        return new Sensation(d.frequency, d.duration, intensity, d.rampUp, d.rampDown, 100,
+                zones.toArray(new Muscle[0]));
+    }
+
+    public synchronized void save() {
+        if (file == null) return;
+        try {
+            if (file.getParent() != null) Files.createDirectories(file.getParent());
+            Files.write(file, toJson().getBytes(StandardCharsets.UTF_8));
+        } catch (IOException ignored) {
+            // surfaced next time the user reloads; UI keeps working in memory
+        }
     }
 }

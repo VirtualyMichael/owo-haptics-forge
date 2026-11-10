@@ -10,7 +10,7 @@ clientSideOnly=true
 
 [[mods]]
 modId="owohaptics"
-version="1.0.0"
+version="1.1.0"
 displayName="OWO Haptics (Forge)"
 #updateJSONURL="https://example.com/updates.json" #optional
 #displayURL="https://example.com/" #optional

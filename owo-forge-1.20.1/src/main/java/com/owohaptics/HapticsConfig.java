@@ -7,12 +7,9 @@ public final class HapticsConfig {
     public static final ForgeConfigSpec.BooleanValue ENABLED;
     public static final ForgeConfigSpec.ConfigValue<String> GAME_ID;
     public static final ForgeConfigSpec.ConfigValue<String> EXTRA_HOST;
-    public static final ForgeConfigSpec.IntValue MASTER_INTENSITY;
-    public static final ForgeConfigSpec.BooleanValue DAMAGE;
-    public static final ForgeConfigSpec.BooleanValue ENVIRONMENT;
-    public static final ForgeConfigSpec.BooleanValue HEARTBEAT;
-    public static final ForgeConfigSpec.BooleanValue ARMS;
-    public static final ForgeConfigSpec.BooleanValue EATING;
+    public static final ForgeConfigSpec.BooleanValue WEB_ENABLED;
+    public static final ForgeConfigSpec.IntValue WEB_PORT;
+    public static final ForgeConfigSpec.BooleanValue WEB_LAN;
 
     static {
         ForgeConfigSpec.Builder b = new ForgeConfigSpec.Builder();
@@ -22,14 +19,12 @@ public final class HapticsConfig {
         EXTRA_HOST = b.comment("Optional IP of the PC running the OWO app, if broadcast discovery fails (e.g. other subnet). Leave empty normally.")
                 .define("owoAppHost", "");
         b.pop();
-        b.push("effects");
-        MASTER_INTENSITY = b.comment("Global intensity percent (0-150) applied to every sensation.").defineInRange("masterIntensity", 100, 0, 150);
-        DAMAGE = b.comment("Directional hit and damage-type haptics.").define("damage", true);
-        ENVIRONMENT = b.comment("Fire, drowning and freezing haptics.").define("environment", true);
-        HEARTBEAT = b.comment("Heartbeat when health is low.").define("lowHealthHeartbeat", true);
-        ARMS = b.comment("Per-arm haptics for swings, mining and bow draw/release (follows your main hand; works with Vivecraft).")
-                .define("armHaptics", true);
-        EATING = b.comment("Gentle pulses while eating or drinking.").define("eating", true);
+        b.push("webUi");
+        WEB_ENABLED = b.comment("Serve the settings page (strengths, zones, test buttons) while the game runs. Type /owo ui for the address.")
+                .define("enabled", true);
+        WEB_PORT = b.comment("Preferred port; the next free one is used if it is taken.").defineInRange("port", 8765, 1024, 65000);
+        WEB_LAN = b.comment("Allow other devices on your network (phone, second PC) to open the page. Anyone on that network could then change your settings.")
+                .define("allowNetworkAccess", false);
         b.pop();
         SPEC = b.build();
     }
